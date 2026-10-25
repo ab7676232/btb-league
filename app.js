@@ -17,7 +17,6 @@ const REFRESH_MS = 2 * 60 * 1000
 const FETCH_POOL = 4
 const FIRST_SIMS = 4000
 const MORE_SIMS = 10000
-const LIST_ROWS = 8
 const MOVES_ROWS = 15
 const VETERAN_SEASONS = 10
 const HURT = new Set(['Out', 'IR', 'Sus'])
@@ -54,6 +53,8 @@ const maxBy = (xs, fn) => xs.reduce((best, x) => (best == null || fn(x) > fn(bes
 const minBy = (xs, fn) => maxBy(xs, (x) => -fn(x))
 const dateOf = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 const isPlayer = (r) => /^\d+$/.test(r.player_id)
+// "Jaren Jackson Jr." reads as Jackson, not Jr.
+const lastName = (name) => String(name).split(' ').filter((w) => !/^(jr\.?|sr\.?|ii|iii|iv|v)$/i.test(w)).slice(-1)[0] || name
 
 async function getJSON(url) {
   const res = await fetch(url)
@@ -554,26 +555,6 @@ function renderAwards() {
     <h3>Week ${V.week}</h3>${awardCards(week)}<h3>Season</h3>${awardCards(season)}`
 }
 
-// ---- players -------------------------------------------------------------
-
-function renderPlayers() {
-  const w = V.week
-  const counted = D.weekSides.flatMap((s) => s.starters.filter((x) => x.pid && x.state !== 'pending').map((x) => ({ ...x, rid: s.roster_id })))
-  const topGames = counted.sort((a, b) => b.pts - a.pts).slice(0, LIST_ROWS)
-  const rostered = [...D.owner.keys()].filter((pid) => S.players[pid])
-  const leaders = rostered.sort((a, b) => S.players[b].fp - S.players[a].fp).slice(0, LIST_ROWS)
-  const free = Object.keys(S.players).filter((pid) => !D.owner.has(pid) && S.players[pid].gp >= 2 && !HURT.has(S.players[pid].inj) && S.players[pid].t !== 'FA')
-    .sort((a, b) => S.players[b].avg - S.players[a].avg).slice(0, LIST_ROWS)
-  const row = (pid, right, sub) => `<li>${face(pid)}<span class="pn"><b>${pname(pid)}</b><small>${esc(S.players[pid]?.t || '')} · ${sub}</small></span>
-    <span class="val num">${right}</span></li>`
-  $('#players').innerHTML = `<div class="head"><h2 id="h-players">Players</h2></div>
-    <div class="lists">
-      <article class="panel list"><h3>Best counted games, week ${w}</h3><ul>${topGames.map((x) => row(x.pid, f1(x.pts), nameOf(x.rid))).join('')}</ul></article>
-      <article class="panel list"><h3>Season leaders on a roster</h3><ul>${leaders.map((pid) => row(pid, f1(S.players[pid].fp), `${nameOf(D.owner.get(pid))} · ${S.players[pid].gp} games`)).join('')}</ul></article>
-      <article class="panel list"><h3>Best free agents</h3><ul>${free.map((pid) => row(pid, `${f1(S.players[pid].avg)}<small>per game</small>`, `${S.players[pid].gp} games`)).join('') || '<li class="muted">None with two games yet.</li>'}</ul></article>
-    </div>`
-}
-
 // ---- moves ---------------------------------------------------------------
 
 function renderMoves() {
@@ -620,11 +601,9 @@ function renderH2H() {
   const winsB = played.filter((m) => weekFinal(m.w) && m.sb > m.sa).length
   const col = (rid) => {
     const r = D.table.find((x) => x.rid === rid)
-    const top = (D.M.get(rid).roster.players || []).filter((p) => S.players[p]).sort((x, y) => S.players[y].avg - S.players[x].avg).slice(0, 5)
     return `<div class="hcol" style="${mc(rid)}">${mgr(rid)}
       <dl><div><dt>Record</dt><dd class="num">${r.w}-${r.l}${r.t ? `-${r.t}` : ''}</dd></div><div><dt>Points for</dt><dd class="num">${f1(r.pf)}</dd></div>
-        <div><dt>Playoffs</dt><dd class="num">${pct(V.tally[rid].po)}</dd></div><div><dt>Title</dt><dd class="num">${pct(V.tally[rid].title)}</dd></div></dl>
-      <ul>${top.map((p) => `<li><span>${pname(p)}</span><span class="num">${f1(S.players[p].avg)}</span></li>`).join('')}</ul></div>`
+        <div><dt>Playoffs</dt><dd class="num">${pct(V.tally[rid].po)}</dd></div><div><dt>Title</dt><dd class="num">${pct(V.tally[rid].title)}</dd></div></dl></div>`
   }
   const opts = (sel, other) => rids.filter((r) => r !== other).map((r) => `<option value="${r}"${r === sel ? ' selected' : ''}>${nameOf(r)}</option>`).join('')
   const series = played.length ? `Season series: ${nameOf(a)} ${winsA}, ${nameOf(b)} ${winsB}. ${played.map((m) => `Week ${m.w}: ${f2(m.sa)}-${f2(m.sb)}${weekFinal(m.w) ? '' : ' (live)'}`).join(' · ')}.` : 'They have not met yet.'
@@ -635,7 +614,6 @@ function renderH2H() {
     <article class="panel h2h">
       <p class="h2h-line">${series}${nextMeet}</p>
       <div class="hcols">${col(a)}${col(b)}</div>
-      <p class="muted small">Top five by points per game this season.</p>
     </article>`
 }
 
@@ -672,14 +650,14 @@ function renderTrades() {
       <div class="date"><span>${dateOf(t.created)}</span>
         <span class="verdict ${ahead == null ? 'even' : 'win'}">${ahead == null ? 'Even so far' : `${nameOf(t.sides[ahead].rid)} +${f1(Math.abs(totals[0] - totals[1]))} so far`}</span></div>
       ${t.sides.map((s, i) => `<div class="tside" style="${mc(s.rid)}">${mgr(s.rid)}<span class="gets">Gets</span>
-        <ul>${s.gets.map((pid) => `<li><span>${pname(pid)}</span><span class="num">${f1(pointsSince(pid, t.week))}</span></li>`).join('')}
+        <ul>${s.gets.map((pid) => `<li><span>${pname(pid)}</span></li>`).join('')}
         ${s.picks.map((p) => `<li><span>${p.season} round ${p.round} pick</span><span class="muted">pick</span></li>`).join('')}</ul>
         <span class="num muted small">${f1(totals[i])} fantasy points since</span></div>`).join('')}
     </article>`
   }).join('')
   $('#trades').innerHTML = `<div class="head"><h2 id="h-trades">Trade desk</h2>
       <span class="chip">${trades.length} trades</span>${fixes >= 1 ? `<span class="chip">${Math.floor(fixes)} undone by the commissioner</span>` : ''}</div>
-    <p class="muted small">Scored by the fantasy points each side's new players have put up since the trade, in every game, started or not.</p>
+    <p class="muted small">Scored by the fantasy points each side's new players have put up since the trade, all together, in every game, started or not.</p>
     <div class="trades">${items || '<p class="muted">No trades yet.</p>'}</div>`
 }
 
@@ -699,28 +677,20 @@ function renderDraft() {
   if (!rows.length) { $('#draft').innerHTML = ''; return }
   const bySlot = new Map(rows.map((d) => [d.slot, d.rid]))
   const slots = [...bySlot.keys()].sort((a, b) => a - b)
-  const heat = (d) => {
-    const delta = Math.max(-40, Math.min(40, d.no - d.rank))
-    const t = (delta + 40) / 80
-    const mix = (a, b, k) => Math.round(a + (b - a) * k)
-    const [r, g, b] = t < 0.5 ? [mix(200, 217, t * 2), mix(71, 211, t * 2), mix(61, 196, t * 2)]
-      : [mix(217, 47, (t - 0.5) * 2), mix(211, 158, (t - 0.5) * 2), mix(196, 98, (t - 0.5) * 2)]
-    return `--heat:rgb(${r},${g},${b});--heat-ink:${(r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#121826' : '#ffffff'}`
-  }
   const rounds = Math.max(...rows.map((d) => d.round))
   let cells = `<span></span>${slots.map((s) => `<div class="colh" style="${mc(bySlot.get(s))}">${av(bySlot.get(s))}<span>${nameOf(bySlot.get(s))}</span></div>`).join('')}`
   for (let r = 1; r <= rounds; r++) {
     cells += `<div class="rowh">${r}</div>`
     for (const s of slots) {
       const d = rows.find((x) => x.round === r && x.slot === s)
-      cells += d ? `<button type="button" class="cell${d.rid === V.me ? ' mine' : ''}" style="${heat(d)}" data-cell="${d.no}" aria-pressed="${V.pickedCell === d.no}"
-        aria-label="Pick ${d.no}, ${esc(d.n)}"><b>${esc(d.n.split(' ').slice(-1)[0])}</b><span class="num">#${d.no} → ${d.rank}</span></button>` : '<span></span>'
+      cells += d ? `<button type="button" class="cell${d.rid === V.me ? ' mine' : ''}" style="${mc(d.rid)}" data-cell="${d.no}" aria-pressed="${V.pickedCell === d.no}"
+        aria-label="Pick ${d.no}, ${esc(d.n)}"><b>${esc(lastName(d.n))}</b><span class="num">#${d.no}</span></button>` : '<span></span>'
     }
   }
   const d = rows.find((x) => x.no === V.pickedCell)
-  const info = d ? `<div class="panel pickinfo" style="${mc(d.rid)}">${mgr(d.rid)} took <b>${esc(d.n)}</b> ${ord(d.no)} overall (round ${d.round}). He has ${f1(d.fp)} fantasy points in ${d.gp} games, ${ord(d.rank)} among everyone drafted.</div>`
-    : '<p class="muted small">Tap any pick to see how it has aged. Colors compare each pick with where his points so far rank.</p>'
-  $('#draft').innerHTML = `<div class="head"><h2 id="h-draft">Draft board</h2><div class="legend"><span>Reach</span><span class="ramp"></span><span>Steal</span></div></div>
+  const info = d ? `<div class="panel pickinfo" style="${mc(d.rid)}">${mgr(d.rid)} took <b>${esc(d.n)}</b> ${ord(d.no)} overall, round ${d.round}.</div>`
+    : '<p class="muted small">Every pick of the draft. Tap one for who made it.</p>'
+  $('#draft').innerHTML = `<div class="head"><h2 id="h-draft">Draft board</h2></div>
     <div class="board-wrap"><div class="board" style="grid-template-columns:34px repeat(${slots.length}, minmax(64px, 1fr))">${cells}</div></div>${info}`
 }
 
@@ -757,8 +727,7 @@ function renderTeam() {
       <ul class="roster">${entries.map(({ pid, slot }) => {
         const p = S.players[pid] || {}
         return `<li><span class="slot${slot === 'BN' || slot === 'IR' ? ' bench' : ''}">${esc(slot || '')}</span>${face(pid)}
-          <span class="pn"><b>${esc(p.n || pid)}${p.inj ? `<span class="hurt">${esc(p.inj)}</span>` : ''}</b><small>${esc(p.t || '')} · ${esc(p.pos || '')}</small></span>
-          <span class="val num">${f1(p.avg)}<small>${p.gp || 0} games</small></span></li>`
+          <span class="pn"><b>${esc(p.n || pid)}${p.inj ? `<span class="hurt">${esc(p.inj)}</span>` : ''}</b><small>${esc(p.t || '')} · ${esc(p.pos || '')}</small></span></li>`
       }).join('')}</ul>
       ${next ? `<h3>Next up</h3><div class="next">${next}</div>` : ''}
     </article>`
@@ -778,7 +747,6 @@ function render() {
   renderWeek()
   renderTable()
   renderAwards()
-  renderPlayers()
   renderH2H()
   renderMoves()
   renderTrades()
