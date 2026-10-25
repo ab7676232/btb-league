@@ -178,7 +178,51 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: 10px; 
 footer { padding-block: 26px calc(28px + env(safe-area-inset-bottom, 0px)); color: var(--muted); font-size: 12.5px; display: grid; gap: 6px; }
 footer p { margin: 0; max-width: 70ch; }
 
+/* recaps and lineup tags */
+.recap { font-size: 13.5px; line-height: 1.35; }
+.tag { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 700; background: var(--sunk); color: var(--muted); vertical-align: 1px; }
+.tag.lock { background: color-mix(in oklab, var(--win) 18%, transparent); color: var(--win); }
+.best { color: var(--muted); font-size: 11px; margin-left: 5px; }
+.awards + h3, section > h3 { margin-top: 4px; }
+
+/* player lists */
+.lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px; }
+.list { padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+.list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.list li { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.list li:last-child { border-bottom: 0; }
+.list .face { width: 32px; height: 32px; }
+.list .pn { display: grid; min-width: 0; flex: 1; }
+.list .pn b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.list .pn small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .val { font-weight: 800; text-align: right; }
+.list .val small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
+
+/* moves */
+.moves { list-style: none; margin: 0; padding: 4px 14px; }
+.moves li { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.moves li:last-child { border-bottom: 0; }
+.moves .mgr .av { width: 24px; height: 24px; }
+.moves .kind { justify-self: start; padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 800; background: var(--sunk); color: var(--muted); }
+.moves .kind.trade { background: var(--mc); color: #fff; }
+.moves time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* head to head */
+.h2h { padding: 14px; display: grid; gap: 12px; }
+.h2h-line { margin: 0; font-size: 14px; }
+.hcols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.hcol { display: grid; gap: 8px; align-content: start; min-width: 0; padding-top: 8px; border-top: 5px solid var(--mc); }
+.hcol dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.hcol dt { font-size: 11px; color: var(--muted); font-weight: 600; }
+.hcol dd { margin: 0; font-weight: 800; font-size: 16px; }
+.hcol ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.hcol li { display: flex; justify-content: space-between; gap: 6px; }
+.hcol li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 640px) {
+  .moves li { grid-template-columns: 1fr auto; }
+  .moves li > span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .hcols { gap: 10px; }
   .rafters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .awards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .award { padding: 11px 10px 26px; gap: 6px; }
@@ -210,12 +254,15 @@ footer p { margin: 0; max-width: 70ch; }
   <section id="week" aria-labelledby="h-week"></section>
   <section id="table" aria-labelledby="h-table"></section>
   <section id="awards" aria-labelledby="h-awards"></section>
+  <section id="players" aria-labelledby="h-players"></section>
+  <section id="h2h" aria-labelledby="h-h2h"></section>
+  <section id="moves" aria-labelledby="h-moves"></section>
   <section id="trades" aria-labelledby="h-trades"></section>
   <section id="draft" aria-labelledby="h-draft"></section>
   <section id="team" aria-labelledby="h-team"></section>
 </main>
 <footer class="wrap">
-  <p>Scores, lineups, rosters, trades and the draft come straight from Sleeper and refresh every two minutes while games are on. Player points use this league's scoring.</p>
+  <p>Scores, lineups, rosters, trades and the draft come straight from Sleeper and refresh every two minutes while games are on. Sleeper's servers do not always agree mid-week, so the live week is asked for several times and the answer most of them give is shown. Player points use this league's scoring.</p>
   <p>Odds simulate the rest of the season thousands of times. Each team starts from its best 10 players' points per game (this season's, steadied by last season's, trimmed for injuries) and moves toward its real weekly scores as weeks are played; the top 6 make the playoffs, the top 2 with a bye.</p>
 </footer>
 <script type="module" src="app.js"></script>

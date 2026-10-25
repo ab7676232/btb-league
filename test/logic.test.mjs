@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
+import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, consensus, lockRead, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
 
 const side = (roster_id, matchup_id, points) => ({ roster_id, matchup_id, points })
 
@@ -79,4 +79,22 @@ test('doubt about team strength is widest before any week and settles toward its
   assert.ok(strengthSd(0) > strengthSd(4))
   assert.ok(strengthSd(4) > strengthSd(20))
   assert.ok(strengthSd(1000) - STRENGTH_SD < 0.1)
+})
+
+test('of several feed answers, the one most servers agree on wins', () => {
+  const a = [{ roster_id: 7, points: 244 }]
+  const b = [{ roster_id: 7, points: 234.5 }]
+  assert.deepEqual(consensus([b, a, a, null, b, a]), a)
+  assert.deepEqual(consensus([b, a]), b)
+  assert.equal(consensus([]), null)
+})
+
+test('a counted score reads as a lock, a ride to the last game, or neither', () => {
+  // locked Thursday's 30.5 before Saturday's 21.0
+  assert.deepEqual(lockRead(30.5, [30.5, 21]), { kind: 'locked', gain: 9.5, left: 0 })
+  // locked Friday's 29.5, then he put up 41 on Saturday
+  assert.deepEqual(lockRead(29.5, [28.5, 29.5, 41]), { kind: 'locked', gain: -11.5, left: 11.5 })
+  assert.deepEqual(lockRead(21, [30.5, 21]), { kind: 'rode', gain: 0, left: 9.5 })
+  assert.deepEqual(lockRead(0, [17.5, 19.5]), { kind: 'other', gain: 0, left: 19.5 })
+  assert.deepEqual(lockRead(0, []), { kind: 'other', gain: 0, left: 0 })
 })

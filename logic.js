@@ -159,3 +159,41 @@ export function winChance(sa, sb, doubt = STRENGTH_SD) {
   const z = (sa - sb) / Math.sqrt(2 * (WEEK_SD ** 2 + doubt ** 2))
   return 0.5 * (1 + Math.tanh(0.7978845608 * (z + 0.044715 * z ** 3)))
 }
+
+/**
+ * Sleeper's public feed answers from servers that do not always agree on the
+ * latest lineups and locks. Given several answers to the same request, take
+ * the one most of them agree on (the first of the most common, on a tie);
+ * `keyOf` says which parts have to match.
+ */
+export function consensus(answers, keyOf = JSON.stringify) {
+  const counts = new Map()
+  for (const a of answers) {
+    if (a == null) continue
+    const key = keyOf(a)
+    const seen = counts.get(key)
+    counts.set(key, { a, n: (seen?.n || 0) + 1 })
+  }
+  let best = null
+  for (const c of counts.values()) if (!best || c.n > best.n) best = c
+  return best?.a ?? null
+}
+
+const same = (x, y) => Math.abs(x - y) < 0.01
+
+/**
+ * Reads how a starter's counted score came about in a lock-in week, from his
+ * games that week in order: 'locked' when it is an earlier game (gain: what
+ * the lock beat his latest game by), 'rode' when it is his latest game,
+ * 'other' when it is neither (a zero after sitting, or a late move). `left` is
+ * how far his best game that week sits above the counted one.
+ */
+export function lockRead(counted, games) {
+  if (!games.length) return { kind: 'other', gain: 0, left: 0 }
+  const latest = games[games.length - 1]
+  const left = Math.max(0, Math.max(...games) - counted)
+  if (same(counted, latest)) return { kind: 'rode', gain: 0, left }
+  if (games.slice(0, -1).some((g) => same(g, counted))) return { kind: 'locked', gain: counted - latest, left }
+  return { kind: 'other', gain: 0, left }
+}
+
