@@ -180,6 +180,8 @@ footer p { margin: 0; max-width: 70ch; }
 
 /* recaps and lineup tags */
 .recap { font-size: 13.5px; line-height: 1.35; }
+.side-row .pts small { display: block; margin-top: 3px; font: 600 11.5px/1 var(--body); color: var(--muted); text-align: right; }
+.side-row .pts { text-align: right; }
 .tag { display: inline-block; margin-left: 5px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 700; background: var(--sunk); color: var(--muted); vertical-align: 1px; }
 .tag.lock { background: color-mix(in oklab, var(--win) 18%, transparent); color: var(--win); }
 .best { color: var(--muted); font-size: 11px; margin-left: 5px; }
@@ -262,7 +264,7 @@ footer p { margin: 0; max-width: 70ch; }
   <section id="team" aria-labelledby="h-team"></section>
 </main>
 <footer class="wrap">
-  <p>Scores, lineups, rosters, trades and the draft come straight from Sleeper and refresh every two minutes while games are on. Sleeper's servers do not always agree mid-week, so the live week is asked for several times and the answer most of them give is shown. Player points use this league's scoring.</p>
+  <p>Scores, lineups, rosters, trades and the draft come straight from Sleeper and refresh every two minutes while games are on. Scores are counted the way the Sleeper app counts them, from each starter's locked game and the box scores, with this league's scoring.</p>
   <p>Odds simulate the rest of the season thousands of times. Each team starts from its best 10 players' points per game (this season's, steadied by last season's, trimmed for injuries) and moves toward its real weekly scores as weeks are played; the top 6 make the playoffs, the top 2 with a bye.</p>
 </footer>
 <script type="module" src="app.js"></script>

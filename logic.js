@@ -160,40 +160,36 @@ export function winChance(sa, sb, doubt = STRENGTH_SD) {
   return 0.5 * (1 + Math.tanh(0.7978845608 * (z + 0.044715 * z ** 3)))
 }
 
+// a starter yet to play: his game's spread as a share of its projection (puts the Sleeper app's
+// win odds within a point on Oct 25)
+export const PENDING_CV = 0.85
+
+const phi = (z) => 0.5 * (1 + Math.tanh(0.7978845608 * (z + 0.044715 * z ** 3)))
+
 /**
- * Sleeper's public feed answers from servers that do not always agree on the
- * latest lineups and locks. Given several answers to the same request, take
- * the one most of them agree on (the first of the most common, on a tie);
- * `keyOf` says which parts have to match.
+ * What a lock-in starter counts so far, the way the Sleeper app counts it.
+ * `lockedGame` is the game Sleeper has him locked to, if any; `teamGames` his
+ * team's games that week ({id, date, done}); `scoreIn(id)` his points in a
+ * game (0 if he sat); `projIn(id)` his projection for one. Unlocked with games
+ * still to come he counts nothing yet, and his team's last game is the one
+ * that will count; unlocked with his team done, that last game counts.
  */
-export function consensus(answers, keyOf = JSON.stringify) {
-  const counts = new Map()
-  for (const a of answers) {
-    if (a == null) continue
-    const key = keyOf(a)
-    const seen = counts.get(key)
-    counts.set(key, { a, n: (seen?.n || 0) + 1 })
+export function starterCount({ lockedGame, teamGames = [], scoreIn, projIn }) {
+  if (lockedGame) {
+    const g = teamGames.find((x) => x.id === lockedGame)
+    return { state: 'locked', pts: g && !g.done ? 0 : scoreIn(lockedGame), proj: 0 }
   }
-  let best = null
-  for (const c of counts.values()) if (!best || c.n > best.n) best = c
-  return best?.a ?? null
+  const ordered = [...teamGames].sort((a, b) => a.date.localeCompare(b.date))
+  const last = ordered[ordered.length - 1]
+  if (!last) return { state: 'final', pts: 0, proj: 0 }
+  if (ordered.some((g) => !g.done)) return { state: 'pending', pts: 0, proj: projIn(last.id) }
+  return { state: 'final', pts: scoreIn(last.id), proj: 0 }
 }
 
-const same = (x, y) => Math.abs(x - y) < 0.01
-
-/**
- * Reads how a starter's counted score came about in a lock-in week, from his
- * games that week in order: 'locked' when it is an earlier game (gain: what
- * the lock beat his latest game by), 'rode' when it is his latest game,
- * 'other' when it is neither (a zero after sitting, or a late move). `left` is
- * how far his best game that week sits above the counted one.
- */
-export function lockRead(counted, games) {
-  if (!games.length) return { kind: 'other', gain: 0, left: 0 }
-  const latest = games[games.length - 1]
-  const left = Math.max(0, Math.max(...games) - counted)
-  if (same(counted, latest)) return { kind: 'rode', gain: 0, left }
-  if (games.slice(0, -1).some((g) => same(g, counted))) return { kind: 'locked', gain: counted - latest, left }
-  return { kind: 'other', gain: 0, left }
+/** A live matchup's win chance from projected totals and the projections still to be played on both sides. */
+export function liveWinChance(projA, projB, pending) {
+  const sd = Math.sqrt(pending.reduce((s, p) => s + (PENDING_CV * p) ** 2, 0))
+  if (sd < 1e-9) return projA > projB ? 1 : projA < projB ? 0 : 0.5
+  return phi((projA - projB) / sd)
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, consensus, lockRead, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
+import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, starterCount, liveWinChance, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
 
 const side = (roster_id, matchup_id, points) => ({ roster_id, matchup_id, points })
 
@@ -81,20 +81,32 @@ test('doubt about team strength is widest before any week and settles toward its
   assert.ok(strengthSd(1000) - STRENGTH_SD < 0.1)
 })
 
-test('of several feed answers, the one most servers agree on wins', () => {
-  const a = [{ roster_id: 7, points: 244 }]
-  const b = [{ roster_id: 7, points: 234.5 }]
-  assert.deepEqual(consensus([b, a, a, null, b, a]), a)
-  assert.deepEqual(consensus([b, a]), b)
-  assert.equal(consensus([]), null)
+// AbBall's week 1 lineup as the Sleeper app counted it on Oct 25
+const games = { tor: [{ id: 't1', date: '2026-10-22', done: true }, { id: 't2', date: '2026-10-24', done: true }, { id: 't3', date: '2026-10-25', done: false }],
+  den: [{ id: 'd1', date: '2026-10-22', done: true }, { id: 'd2', date: '2026-10-24', done: true }] }
+const points = { t1: 22, t2: 34.5, d1: 11, d2: 36.5 }
+const scoreIn = (id) => points[id] ?? 0
+const projIn = (id) => (id === 't3' ? 23.37 : 0)
+
+test('a locked starter counts his locked game, even with games left', () => {
+  assert.deepEqual(starterCount({ lockedGame: 't2', teamGames: games.tor, scoreIn, projIn }), { state: 'locked', pts: 34.5, proj: 0 })
 })
 
-test('a counted score reads as a lock, a ride to the last game, or neither', () => {
-  // locked Thursday's 30.5 before Saturday's 21.0
-  assert.deepEqual(lockRead(30.5, [30.5, 21]), { kind: 'locked', gain: 9.5, left: 0 })
-  // locked Friday's 29.5, then he put up 41 on Saturday
-  assert.deepEqual(lockRead(29.5, [28.5, 29.5, 41]), { kind: 'locked', gain: -11.5, left: 11.5 })
-  assert.deepEqual(lockRead(21, [30.5, 21]), { kind: 'rode', gain: 0, left: 9.5 })
-  assert.deepEqual(lockRead(0, [17.5, 19.5]), { kind: 'other', gain: 0, left: 19.5 })
-  assert.deepEqual(lockRead(0, []), { kind: 'other', gain: 0, left: 0 })
+test('an unlocked starter with a game to come counts nothing yet and projects his last game', () => {
+  assert.deepEqual(starterCount({ lockedGame: null, teamGames: games.tor, scoreIn, projIn }), { state: 'pending', pts: 0, proj: 23.37 })
+})
+
+test('an unlocked starter whose team is done counts its final game, zero if he sat it', () => {
+  assert.deepEqual(starterCount({ lockedGame: null, teamGames: games.den, scoreIn, projIn }), { state: 'final', pts: 36.5, proj: 0 })
+  assert.equal(starterCount({ lockedGame: null, teamGames: games.den, scoreIn: () => 0, projIn }).pts, 0)
+  assert.equal(starterCount({ lockedGame: null, teamGames: [], scoreIn, projIn }).pts, 0)
+})
+
+test('live win odds land within a point of the app (56%, 61%, 47%, 60% on Oct 25)', () => {
+  const near = (x, app) => assert.ok(Math.abs(100 * x - app) <= 1.05, `${(100 * x).toFixed(1)} vs ${app}`)
+  near(liveWinChance(272.57, 267.53, [13.21, 23.37, 22.87, 22.16]), 56)
+  near(liveWinChance(289.5, 280.69, [27.21, 23.98]), 61)
+  near(liveWinChance(259.55, 262.38, [27.54, 31.13, 21.77, 23.48]), 47)
+  near(liveWinChance(245.44, 232.75, [22.5, 21.7, 20.73, 25.03, 20.27, 23.96]), 60)
+  assert.equal(liveWinChance(250, 240, []), 1)
 })
