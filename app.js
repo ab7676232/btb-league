@@ -641,6 +641,54 @@ function seasonAwards() {
   return out
 }
 
+// awards with a little edge, all from what already happened
+function banterAwards() {
+  const out = []
+  const add = (title, rid, big, text) => rid != null && out.push({ title, rid, big, text })
+  const w = V.week
+  const sides = D.weekSides
+  const live = !weekFinal(w)
+  if (sides.length) {
+    const ranked = [...sides].sort((a, b) => b.points - a.points)
+    const last = ranked[ranked.length - 1]
+    add(live ? 'Participation trophy, so far' : 'Participation trophy', last.roster_id, f2(last.points), `The week's lowest score. Everybody gets one.`)
+    if (ranked[1]) add('Bridesmaid', ranked[1].roster_id, f2(ranked[1].points), `Second-best score of the week, ${f2(ranked[0].points - ranked[1].points)} behind ${nameOf(ranked[0].roster_id)}. Always the bridesmaid.`)
+    const counted = (s) => s.starters.filter((x) => x.pid && x.state !== 'pending')
+    const wrongGuy = (s) => {
+      const sat = maxBy(s.bench, (b) => b.best)
+      const low = minBy(counted(s), (x) => x.pts)
+      return sat && low ? { sat, low, gap: sat.best - low.pts } : { gap: 0 }
+    }
+    const benched = maxBy(sides, (s) => wrongGuy(s).gap)
+    const g = wrongGuy(benched)
+    if (g.gap > 0) add('Benched the wrong guy', benched.roster_id, f1(g.gap), `${pname(g.sat.pid)} put up ${f1(g.sat.best)} on his bench while ${pname(g.low.pid)} counted ${f1(g.low.pts)}.`)
+    const cold = minBy(sides.flatMap((s) => counted(s).filter((x) => x.pts > 0).map((x) => ({ ...x, rid: s.roster_id }))), (x) => x.pts)
+    if (cold) add('Ice cold', cold.rid, f1(cold.pts), `${pname(cold.pid)} gave him ${f1(cold.pts)}. Somebody bring a blanket.`)
+    const trades = tradeList()
+    const between = (a, b) => trades.filter((t) => t.sides.some((x) => x.rid === a) && t.sides.some((x) => x.rid === b)).length
+    const rivals = maxBy(pairs(sides), ([a, b]) => between(a.roster_id, b.roster_id))
+    if (rivals && between(rivals[0].roster_id, rivals[1].roster_id)) {
+      const [a, b] = rivals
+      const n = between(a.roster_id, b.roster_id)
+      add('Revenge game', (a.points >= b.points ? a : b).roster_id, `${n}x`, `${nameOf(a.roster_id)} and ${nameOf(b.roster_id)} have traded ${n === 1 ? 'once' : `${n} times`}. This week they settle it.`)
+    }
+  }
+  const mgrs = [...D.M.values()]
+  const trades = tradeList()
+  const moves = (rid) => trades.filter((t) => t.sides.some((x) => x.rid === rid)).length
+    + S.transactions.filter((t) => t.status === 'complete' && (t.type === 'free_agent' || t.type === 'waiver') && Object.values(t.adds || {}).includes(rid)).length
+  const lazy = minBy(mgrs, (m) => moves(m.rid))
+  if (lazy) add('Set it and forget it', lazy.rid, String(moves(lazy.rid)), `Moves all season. The roster runs itself.`)
+  const lastPick = maxBy(draftRows(), (d) => d.no)
+  if (lastPick) add('Mr. Irrelevant', lastPick.rid, `#${lastPick.no}`, `${esc(lastPick.n)} went dead last in the draft and has ${f1(lastPick.fp)} points since.`)
+  if (D.finished.length >= 2) {
+    const byPf = [...D.table].sort((a, b) => b.pf - a.pf)
+    const fraud = D.table.find((r, i) => i < 3 && byPf.indexOf(r) >= D.table.length / 2)
+    if (fraud) add('Fraud watch', fraud.rid, `${fraud.w}-${fraud.l}`, `A top-three record with the league's ${ord(byPf.indexOf(fraud) + 1)}-most points. We see you.`)
+  }
+  return out
+}
+
 function awardCards(list) {
   return `<div class="awards">${list.map((a) => `<article class="award${a.rid === V.me ? ' is-me' : ''}" style="${mc(a.rid)}">
     <h3>${esc(a.title)}</h3><div class="who">${av(a.rid)}${nameOf(a.rid)}</div><div class="big num">${a.big}</div><p>${a.text}</p></article>`).join('')}</div>`
@@ -649,11 +697,12 @@ function awardCards(list) {
 function renderAwards() {
   const week = weekAwards()
   const season = seasonAwards()
+  const banter = banterAwards()
   const tally = {}
   for (const a of [...week, ...season]) tally[a.rid] = (tally[a.rid] || 0) + 1
   const leader = maxBy(Object.entries(tally), ([, n]) => n)
   $('#awards').innerHTML = `<div class="head"><h2 id="h-awards">Awards</h2>${leader ? `<span class="chip">Most banners: ${nameOf(Number(leader[0]))}, ${leader[1]}</span>` : ''}</div>
-    <h3>Week ${V.week}</h3>${awardCards(week)}<h3>Season</h3>${awardCards(season)}`
+    <h3>Week ${V.week}</h3>${awardCards(week)}<h3>Banter</h3>${awardCards(banter)}<h3>Season</h3>${awardCards(season)}`
 }
 
 // ---- moves ---------------------------------------------------------------
@@ -895,6 +944,7 @@ function render() {
   renderDraft()
   renderQuiz()
   renderTeam()
+  updateMenu()
 }
 
 // ---- wiring --------------------------------------------------------------
@@ -1002,4 +1052,36 @@ setInterval(async () => {
   } catch { /* keep what is on screen; the next tick tries again */ }
 }, REFRESH_MS)
 
+// the section menu marks the section being read: the last one whose top has reached the menu
+const MENU_LINE = 120
+function watchSections() {
+  const links = [...document.querySelectorAll('.side ul a[href^="#"]')]
+  const nav = document.querySelector('.side')
+  let current = null
+  const update = () => {
+    let id = links[0]?.getAttribute('href').slice(1)
+    for (const a of links) {
+      const el = document.getElementById(a.getAttribute('href').slice(1))
+      if (el?.offsetHeight && el.getBoundingClientRect().top <= MENU_LINE) id = el.id
+    }
+    if (id === current) return
+    current = id
+    for (const a of links) {
+      if (a.getAttribute('href') === `#${id}`) {
+        a.setAttribute('aria-current', 'true')
+        // on a phone the menu is a strip: keep the current link in view without moving the page
+        if (nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: Math.max(0, a.offsetLeft - nav.clientWidth / 3), behavior: 'smooth' })
+      } else a.removeAttribute('aria-current')
+    }
+  }
+  let queued = false
+  addEventListener('scroll', () => {
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => { queued = false; update() })
+  }, { passive: true })
+  return update
+}
+
+const updateMenu = watchSections()
 start()

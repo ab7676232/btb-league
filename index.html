@@ -178,6 +178,30 @@ select { font: inherit; color: inherit; padding: 7px 10px; border-radius: 10px; 
 footer { padding-block: 26px calc(28px + env(safe-area-inset-bottom, 0px)); color: var(--muted); font-size: 12.5px; display: grid; gap: 6px; }
 footer p { margin: 0; max-width: 70ch; }
 
+/* the section menu: a sidebar on wide screens, a sticky strip on phones */
+html { scroll-behavior: smooth; }
+section { scroll-margin-top: 64px; }
+.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); }
+.page { min-width: 0; }
+.side { position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: calc(22px + env(safe-area-inset-top, 0px)) 14px 22px max(14px, env(safe-area-inset-left, 0px));
+  border-right: 1px solid var(--line); background: var(--surface); display: grid; align-content: start; gap: 14px; }
+.side-brand { font: 400 26px/1 var(--display); color: var(--ink); text-decoration: none; }
+.side ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.side a:not(.side-brand) { display: block; padding: 8px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 700; font-size: 14px; }
+.side a:not(.side-brand):hover { color: var(--ink); background: var(--sunk); }
+.side a[aria-current="true"] { color: var(--bg); background: var(--ink); }
+@media (max-width: 999px) {
+  .shell { display: block; }
+  .side { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; height: auto; display: flex; align-items: center; gap: 10px; overflow-x: auto; overflow-y: hidden;
+    padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .side::-webkit-scrollbar { display: none; }
+  .side-brand { font-size: 18px; flex: none; }
+  .side ul { display: flex; gap: 4px; }
+  .side a:not(.side-brand) { white-space: nowrap; padding: 6px 10px; font-size: 13px; }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--surface); }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
 /* recaps and lineup tags */
 .recap { font-size: 13.5px; line-height: 1.35; }
 .side-row .pts small { display: block; margin-top: 3px; font: 600 11.5px/1 var(--body); color: var(--muted); text-align: right; }
@@ -294,7 +318,24 @@ footer p { margin: 0; max-width: 70ch; }
 </style>
 </head>
 <body>
-<header class="wrap mast">
+<div class="shell">
+<nav class="side" aria-label="Sections">
+  <a class="side-brand" href="#top">BTB</a>
+  <ul>
+    <li><a href="#week">Matchups</a></li>
+    <li><a href="#awards">Awards</a></li>
+    <li><a href="#table">Standings and odds</a></li>
+    <li><a href="#team">Your team</a></li>
+    <li><a href="#scorers">Top scorers</a></li>
+    <li><a href="#quiz">Who drafted him?</a></li>
+    <li><a href="#h2h">Head to head</a></li>
+    <li><a href="#trades">Trade desk</a></li>
+    <li><a href="#moves">Latest moves</a></li>
+    <li><a href="#draft">Draft board</a></li>
+  </ul>
+</nav>
+<div class="page">
+<header class="wrap mast" id="top">
   <h1 id="title">BeneathTheBoxscore</h1>
   <p id="asof" class="muted">Loading the league from Sleeper…</p>
   <div class="rafters" id="rafters" role="group" aria-label="Pick your team"></div>
@@ -302,20 +343,22 @@ footer p { margin: 0; max-width: 70ch; }
 </header>
 <main class="wrap" id="main">
   <section id="week" aria-labelledby="h-week"></section>
-  <section id="scorers" aria-labelledby="h-scorers"></section>
-  <section id="table" aria-labelledby="h-table"></section>
   <section id="awards" aria-labelledby="h-awards"></section>
-  <section id="h2h" aria-labelledby="h-h2h"></section>
-  <section id="moves" aria-labelledby="h-moves"></section>
-  <section id="trades" aria-labelledby="h-trades"></section>
-  <section id="draft" aria-labelledby="h-draft"></section>
-  <section id="quiz" aria-labelledby="h-quiz"></section>
+  <section id="table" aria-labelledby="h-table"></section>
   <section id="team" aria-labelledby="h-team"></section>
+  <section id="scorers" aria-labelledby="h-scorers"></section>
+  <section id="quiz" aria-labelledby="h-quiz"></section>
+  <section id="h2h" aria-labelledby="h-h2h"></section>
+  <section id="trades" aria-labelledby="h-trades"></section>
+  <section id="moves" aria-labelledby="h-moves"></section>
+  <section id="draft" aria-labelledby="h-draft"></section>
 </main>
 <footer class="wrap">
   <p>Scores, lineups, rosters, trades and the draft come straight from Sleeper and refresh every two minutes while games are on. Scores are counted the way the Sleeper app counts them, from each starter's locked game and the box scores, with this league's scoring.</p>
   <p>Odds simulate the rest of the season thousands of times. Each team starts from its best 10 players' points per game (this season's, steadied by last season's, trimmed for injuries) and moves toward its real weekly scores as weeks are played; the top 6 make the playoffs, the top 2 with a bye.</p>
 </footer>
+</div>
+</div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
