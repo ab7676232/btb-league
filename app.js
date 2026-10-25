@@ -1,4 +1,4 @@
-import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, starterCount, liveWinChance } from './logic.js'
+import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, starterCount, liveWinChance, rollSeason } from './logic.js'
 
 // BeneathTheBoxscore's league page: scores, lineups, standings, odds, awards,
 // players, moves, head to head, trades and the draft, read live from Sleeper
@@ -18,6 +18,10 @@ const FETCH_POOL = 4
 const FIRST_SIMS = 4000
 const MORE_SIMS = 10000
 const MOVES_ROWS = 15
+const SCORER_ROWS = 8
+// the top of a what-it-takes slider, in fantasy points
+const SLIDER_MAX = 70
+const QUIZ_KEY = 'btb-quiz-best'
 const VETERAN_SEASONS = 10
 const HURT = new Set(['Out', 'IR', 'Sus'])
 const BENCH = new Set(['BN', 'IR', 'TAXI'])
@@ -77,7 +81,8 @@ async function pool(items, fn) {
 }
 
 const S = { ready: false, error: null, weeks: {}, finals: {} }
-const V = { week: null, me: Number(store.get(ME_KEY)) || null, forced: {}, pickedCell: null, open: new Set(), tally: null, h2h: [null, null] }
+const V = { week: null, me: Number(store.get(ME_KEY)) || null, forced: {}, pickedCell: null, open: new Set(), tally: null, h2h: [null, null],
+  sliders: {}, witSides: {}, banter: {}, rolled: null, quiz: null, quizScore: { right: 0, total: 0, streak: 0 } }
 
 // ---- loading -------------------------------------------------------------
 
@@ -294,6 +299,8 @@ function face(pid) {
   const initials = (S.players[pid]?.n || '?').split(' ').map((w) => w[0]).slice(0, 2).join('')
   return `<span class="face" aria-hidden="true"><span>${esc(initials)}</span><img src="${faceUrl(pid)}" alt="" loading="lazy" onerror="this.remove()"></span>`
 }
+const shuffle = (xs) => xs.map((x) => [Math.random(), x]).sort((a, b) => a[0] - b[0]).map(([, x]) => x)
+const pick = (xs) => xs[Math.floor(Math.random() * xs.length)]
 const pname = (pid) => esc(S.players[pid]?.n || S.picks.find((p) => p.player_id === pid)?.metadata?.last_name || `Player ${pid}`)
 
 // ---- sections ------------------------------------------------------------
@@ -334,24 +341,88 @@ function lineup(side) {
   return `<ul class="lineup">${rows}<li class="total"><span></span><span>Total</span><b class="num">${f2(side.points)}</b></li>${benchRows}</ul>`
 }
 
+// ---- what it takes: drag the starters still to play and watch the matchup flip
+const slideKey = (id, pid) => `${id}-${pid}`
+const slideValue = (id, s) => V.sliders[slideKey(id, s.pid)] ?? s.proj
+
+function witTotals(id, a, b) {
+  const total = (side) => side.points + sum(pendingOf(side).map((s) => slideValue(id, s)))
+  return [total(a), total(b)]
+}
+
+function witLine(id, a, b) {
+  const [ta, tb] = witTotals(id, a, b)
+  if (Math.abs(ta - tb) < 0.005) return `Dead even at ${f2(ta)}.`
+  const [win, lose, tw, tl] = ta > tb ? [a, b, ta, tb] : [b, a, tb, ta]
+  let line = `${nameOf(win.roster_id)} wins ${f2(tw)} to ${f2(tl)}.`
+  const left = pendingOf(lose).length
+  if (left) line += ` ${nameOf(lose.roster_id)}'s ${left} still to play need ${f2(tw - lose.points)} combined to flip it.`
+  else line += ` ${nameOf(lose.roster_id)} has nobody left to play.`
+  return line
+}
+
+function whatItTakes(id, a, b) {
+  const rows = [a, b].flatMap((side) => pendingOf(side).map((s) => {
+    const key = slideKey(id, s.pid)
+    return `<label class="slide" style="${mc(side.roster_id)}"><span>${pname(s.pid)}<small>${nameOf(side.roster_id)} · proj ${f1(s.proj)}</small></span>
+      <input type="range" min="0" max="${SLIDER_MAX}" step="0.1" value="${slideValue(id, s)}" data-slide="${key}" data-mid="${id}" aria-label="${pname(s.pid)}'s score">
+      <b class="num" id="sv-${key}">${f1(slideValue(id, s))}</b></label>`
+  }))
+  if (!rows.length) return ''
+  return `<div class="wit"><h4>What it takes</h4><p class="wit-line" id="witl-${id}">${witLine(id, a, b)}</p>${rows.join('')}
+    <button type="button" class="btn ghost" data-unslide="${id}">Back to projections</button></div>`
+}
+
+// ---- banter: a line about the matchup to send the group chat
+function banterLines(week, a, b) {
+  const final = weekFinal(week)
+  const [lead, trail] = a.points >= b.points ? [a, b] : [b, a]
+  const L = nameOf(lead.roster_id)
+  const T = nameOf(trail.roster_id)
+  const m = f2(lead.points - trail.points)
+  const star = maxBy(lead.starters.filter((s) => s.pid && s.state !== 'pending'), (s) => s.pts)
+  const pl = pendingOf(lead).length
+  const pt = pendingOf(trail).length
+  const lines = []
+  if (final) {
+    lines.push(`${L} beat ${T} by ${m}. Somebody print the banner.`)
+    lines.push(`${T} put up ${f2(trail.points)} and still took the L. ${L} would like a word.`)
+    if (star) lines.push(`${pname(star.pid)} dropped ${f1(star.pts)} for ${L}. ${T} felt every point of it.`)
+  } else {
+    lines.push(`${L} up ${m}${pl ? ` with ${pl} still to play` : ''}. ${T}, the comeback starts whenever you're ready.`)
+    if (pt) lines.push(`${T} needs a big night from ${pt} player${pt === 1 ? '' : 's'} still to play. No pressure.`)
+    else lines.push(`${T} is out of players and down ${m}. Thoughts and prayers.`)
+    if (star) lines.push(`${pname(star.pid)} has ${f1(star.pts)} counting for ${L}. ${T} is refreshing the app every 30 seconds.`)
+    const favourite = a.proj >= b.proj ? a : b
+    const underdog = favourite === a ? b : a
+    lines.push(`Projection says ${nameOf(favourite.roster_id)} ${f2(favourite.proj)}, ${nameOf(underdog.roster_id)} ${f2(underdog.proj)}. Projections have been wrong before, ${nameOf(underdog.roster_id)}.`)
+  }
+  return lines
+}
+
 function renderWeek() {
   const w = V.week
   const ps = pairs(D.weekSides)
   const final = weekFinal(w)
+  V.witSides = {}
   const games = ps.map(([a, b]) => {
     const id = `${w}-${a.matchup_id}`
+    V.witSides[id] = [a, b]
     const lead = a.points >= b.points ? a.roster_id : b.roster_id
     const open = V.open.has(id)
     const chance = final ? null : liveChance(a, b)
     const sideRow = (s, p) => `<div class="side-row${s.roster_id === lead && a.points !== b.points ? ' lead' : ''}">${mgr(s.roster_id)}
       <span class="pts num">${f2(s.points)}${final ? '' : `<small>proj ${f2(s.proj)} · ${pct(p)} win</small>`}</span></div>`
+    const banter = V.banter[id]
     return `<article class="panel game" style="${mc(lead)}">
       <button type="button" aria-expanded="${open}" aria-controls="lu-${id}" data-expand="${id}">
         ${sideRow(a, chance)}${sideRow(b, chance == null ? null : 1 - chance)}
         <span class="recap">${recap(w, a, b)}</span>
-        <span class="margin">${open ? 'Hide lineups' : 'Show lineups'}</span>
+        <span class="margin">${open ? 'Hide lineups' : final ? 'Show lineups' : 'Show lineups and what it takes'}</span>
       </button>
-      <div class="lineups" id="lu-${id}"${open ? '' : ' hidden'}>${lineup(a)}${lineup(b)}</div>
+      <div class="lineups" id="lu-${id}"${open ? '' : ' hidden'}>${lineup(a)}${lineup(b)}${final ? '' : whatItTakes(id, a, b)}</div>
+      <div class="card-tools"><button type="button" class="btn ghost" data-banter="${id}">${banter ? 'Another line' : 'Banter'}</button>
+        ${banter ? `<p class="banter" id="ban-${id}">${banter}</p><button type="button" class="btn ghost" data-copy="ban-${id}">Copy</button>` : ''}</div>
     </article>`
   }).join('')
   const weeks = Array.from({ length: S.current }, (_, i) => i + 1)
@@ -360,6 +431,15 @@ function renderWeek() {
         <label class="sr" for="week-pick">Week</label><select id="week-pick">${weeks.map((x) => `<option value="${x}"${x === w ? ' selected' : ''}>Week ${x}</option>`).join('')}</select></div></div>
     <div class="games">${games || '<p class="muted">No matchups this week.</p>'}</div>
     <p class="muted small">Counted like the Sleeper app: a locked starter counts his locked game, an unlocked one counts his team's last game once it is played and nothing until then. Projections add Sleeper's projection for each starter still to play.</p>`
+}
+
+// ---- top scorers of the week
+function renderScorers() {
+  const counted = D.weekSides.flatMap((s) => s.starters.filter((x) => x.pid && x.state !== 'pending').map((x) => ({ ...x, rid: s.roster_id })))
+  const top = counted.sort((a, b) => b.pts - a.pts).slice(0, SCORER_ROWS)
+  $('#scorers').innerHTML = top.length ? `<div class="head"><h2 id="h-scorers">Top scorers, week ${V.week}</h2></div>
+    <ol class="panel list">${top.map((x, i) => `<li><span class="rank-n num">${i + 1}</span>${face(x.pid)}<span class="pn"><b>${pname(x.pid)}</b><small>${esc(S.players[x.pid]?.t || '')} · ${nameOf(x.rid)}</small></span>
+      <span class="val num">${f1(x.pts)}</span></li>`).join('')}</ol>` : ''
 }
 
 function renderTable() {
@@ -383,7 +463,28 @@ function renderTable() {
         const o = s === a ? b : a
         return `<button type="button" style="${mc(s.roster_id)}" data-force="${key}|${s.roster_id}" aria-pressed="${V.forced[key] === s.roster_id}">${nameOf(s.roster_id)}<small>${pct(winChance(D.strength[s.roster_id], D.strength[o.roster_id], D.doubt))} to win</small></button>`
       }).join('')}<span class="vs">${V.forced[key] ? 'Tap again to undo' : 'Tap who wins'}</span></div>`
-    }).join('')}</div>` : ''}`
+    }).join('')}</div>` : ''}
+    <h3>Roll one season</h3>
+    <div class="panel roll">${V.rolled ? rolledView(V.rolled) : '<p class="muted small">One way the rest of the season could go, start to finish. Your week picks above count.</p>'}
+      <button type="button" class="btn" data-action="roll">${V.rolled ? 'Roll again' : 'Roll a season'}</button></div>`
+}
+
+function runRoll() {
+  const d = derive()
+  V.rolled = rollSeason({ rids: d.rids, strength: d.strength, table: d.table, live: d.live, schedule: d.schedule,
+    forced: V.forced, playoffTeams: Number(S.league.settings?.playoff_teams) || 6, doubt: d.doubt })
+}
+
+function rolledView(r) {
+  const seedOf = (rid) => r.seeds.indexOf(rid) + 1
+  const team = (rid, won) => `<span class="bk-team${won ? ' won' : ''}" style="${mc(rid)}"><i class="num">${seedOf(rid)}</i>${av(rid)}<b>${nameOf(rid)}</b></span>`
+  const game = (g) => `<div class="bk-game">${team(g.a, g.w === g.a)}${team(g.b, g.w === g.b)}</div>`
+  const b = r.bracket
+  return `<ol class="roll-table">${r.seeds.map((rid, i) => `<li class="${i < (r.field.length) ? 'in' : 'out'}" style="${mc(rid)}"><span class="num">${i + 1}</span>${mgr(rid)}
+      <span class="num">${r.wins[rid]}-${r.losses[rid]}</span></li>`).join('')}</ol>
+    ${b ? `<div class="bracket"><div><h4>First round</h4>${b.round1.map(game).join('')}</div><div><h4>Semifinals</h4>${b.semis.map(game).join('')}</div>
+      <div><h4>Final</h4>${game(b.final)}</div></div>
+    <p class="champ" style="${mc(b.champ)}">${av(b.champ)}<span>${nameOf(b.champ)} wins the title in this one.</span></p>` : ''}`
 }
 
 // ---- awards --------------------------------------------------------------
@@ -650,7 +751,7 @@ function renderTrades() {
       <div class="date"><span>${dateOf(t.created)}</span>
         <span class="verdict ${ahead == null ? 'even' : 'win'}">${ahead == null ? 'Even so far' : `${nameOf(t.sides[ahead].rid)} +${f1(Math.abs(totals[0] - totals[1]))} so far`}</span></div>
       ${t.sides.map((s, i) => `<div class="tside" style="${mc(s.rid)}">${mgr(s.rid)}<span class="gets">Gets</span>
-        <ul>${s.gets.map((pid) => `<li><span>${pname(pid)}</span></li>`).join('')}
+        <ul>${s.gets.map((pid) => `<li><span>${pname(pid)}</span><span class="num">${f1(pointsSince(pid, t.week))}</span></li>`).join('')}
         ${s.picks.map((p) => `<li><span>${p.season} round ${p.round} pick</span><span class="muted">pick</span></li>`).join('')}</ul>
         <span class="num muted small">${f1(totals[i])} fantasy points since</span></div>`).join('')}
     </article>`
@@ -677,21 +778,60 @@ function renderDraft() {
   if (!rows.length) { $('#draft').innerHTML = ''; return }
   const bySlot = new Map(rows.map((d) => [d.slot, d.rid]))
   const slots = [...bySlot.keys()].sort((a, b) => a - b)
+  const heat = (d) => {
+    const delta = Math.max(-40, Math.min(40, d.no - d.rank))
+    const t = (delta + 40) / 80
+    const mix = (a, b, k) => Math.round(a + (b - a) * k)
+    const [r, g, b] = t < 0.5 ? [mix(200, 217, t * 2), mix(71, 211, t * 2), mix(61, 196, t * 2)]
+      : [mix(217, 47, (t - 0.5) * 2), mix(211, 158, (t - 0.5) * 2), mix(196, 98, (t - 0.5) * 2)]
+    return `--heat:rgb(${r},${g},${b});--heat-ink:${(r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#121826' : '#ffffff'}`
+  }
   const rounds = Math.max(...rows.map((d) => d.round))
   let cells = `<span></span>${slots.map((s) => `<div class="colh" style="${mc(bySlot.get(s))}">${av(bySlot.get(s))}<span>${nameOf(bySlot.get(s))}</span></div>`).join('')}`
   for (let r = 1; r <= rounds; r++) {
     cells += `<div class="rowh">${r}</div>`
     for (const s of slots) {
       const d = rows.find((x) => x.round === r && x.slot === s)
-      cells += d ? `<button type="button" class="cell${d.rid === V.me ? ' mine' : ''}" style="${mc(d.rid)}" data-cell="${d.no}" aria-pressed="${V.pickedCell === d.no}"
-        aria-label="Pick ${d.no}, ${esc(d.n)}"><b>${esc(lastName(d.n))}</b><span class="num">#${d.no}</span></button>` : '<span></span>'
+      cells += d ? `<button type="button" class="cell${d.rid === V.me ? ' mine' : ''}" style="${heat(d)}" data-cell="${d.no}" aria-pressed="${V.pickedCell === d.no}"
+        aria-label="Pick ${d.no}, ${esc(d.n)}"><b>${esc(lastName(d.n))}</b><span class="num">#${d.no} → ${d.rank}</span></button>` : '<span></span>'
     }
   }
   const d = rows.find((x) => x.no === V.pickedCell)
-  const info = d ? `<div class="panel pickinfo" style="${mc(d.rid)}">${mgr(d.rid)} took <b>${esc(d.n)}</b> ${ord(d.no)} overall, round ${d.round}.</div>`
-    : '<p class="muted small">Every pick of the draft. Tap one for who made it.</p>'
-  $('#draft').innerHTML = `<div class="head"><h2 id="h-draft">Draft board</h2></div>
+  const info = d ? `<div class="panel pickinfo" style="${mc(d.rid)}">${mgr(d.rid)} took <b>${esc(d.n)}</b> ${ord(d.no)} overall (round ${d.round}). He has ${f1(d.fp)} fantasy points in ${d.gp} games, ${ord(d.rank)} among everyone drafted.</div>`
+    : '<p class="muted small">Tap any pick to see how it has aged. Colors compare each pick with where his points so far rank.</p>'
+  $('#draft').innerHTML = `<div class="head"><h2 id="h-draft">Draft board</h2><div class="legend"><span>Reach</span><span class="ramp"></span><span>Steal</span></div></div>
     <div class="board-wrap"><div class="board" style="grid-template-columns:34px repeat(${slots.length}, minmax(64px, 1fr))">${cells}</div></div>${info}`
+}
+
+// ---- who drafted him: a quiz on the draft
+function newQuestion() {
+  const rows = draftRows()
+  if (!rows.length) return
+  const d = pick(rows)
+  const others = shuffle([...D.M.keys()].filter((r) => r !== d.rid)).slice(0, 3)
+  V.quiz = { no: d.no, options: shuffle([d.rid, ...others]), answer: null }
+}
+
+function renderQuiz() {
+  if (!V.quiz) newQuestion()
+  if (!V.quiz) { $('#quiz').innerHTML = ''; return }
+  const d = draftRows().find((x) => x.no === V.quiz.no)
+  const q = V.quiz
+  const best = Number(store.get(QUIZ_KEY)) || 0
+  const sc = V.quizScore
+  const options = q.options.map((rid) => {
+    const state = q.answer == null ? '' : rid === d.rid ? ' right' : rid === q.answer ? ' wrong' : ''
+    return `<button type="button" class="quiz-opt${state}" style="${mc(rid)}" data-guess="${rid}"${q.answer != null ? ' disabled' : ''}>${av(rid)}<b>${nameOf(rid)}</b></button>`
+  }).join('')
+  $('#quiz').innerHTML = `<div class="head"><h2 id="h-quiz">Who drafted him?</h2>
+      <span class="chip">${sc.right}/${sc.total} · streak ${sc.streak} · best ${best}</span></div>
+    <article class="panel quiz">
+      <div class="quiz-player">${face(d.pid)}<span><b>${esc(d.n)}</b><small>Round ${d.round}</small></span></div>
+      <div class="quiz-opts">${options}</div>
+      ${q.answer == null ? '<p class="muted small">Pick the manager who drafted him.</p>'
+        : `<p class="quiz-result">${q.answer === d.rid ? 'Right.' : 'Nope.'} ${nameOf(d.rid)} took him ${ord(d.no)} overall.</p>
+           <button type="button" class="btn" data-action="next-question">Next player</button>`}
+    </article>`
 }
 
 // ---- your team -------------------------------------------------------------
@@ -727,7 +867,8 @@ function renderTeam() {
       <ul class="roster">${entries.map(({ pid, slot }) => {
         const p = S.players[pid] || {}
         return `<li><span class="slot${slot === 'BN' || slot === 'IR' ? ' bench' : ''}">${esc(slot || '')}</span>${face(pid)}
-          <span class="pn"><b>${esc(p.n || pid)}${p.inj ? `<span class="hurt">${esc(p.inj)}</span>` : ''}</b><small>${esc(p.t || '')} · ${esc(p.pos || '')}</small></span></li>`
+          <span class="pn"><b>${esc(p.n || pid)}${p.inj ? `<span class="hurt">${esc(p.inj)}</span>` : ''}</b><small>${esc(p.t || '')} · ${esc(p.pos || '')}</small></span>
+          <span class="val num">${f1(p.avg)}<small>${p.gp || 0} games</small></span></li>`
       }).join('')}</ul>
       ${next ? `<h3>Next up</h3><div class="next">${next}</div>` : ''}
     </article>`
@@ -745,12 +886,14 @@ function render() {
   $('#asof').textContent = `${S.rosters.length} teams · Sleeper Lock-in · ${S.inSeason && !weekFinal(S.current) ? `live, updated ${upd}` : `updated ${upd}`}`
   renderRafters()
   renderWeek()
+  renderScorers()
   renderTable()
   renderAwards()
   renderH2H()
   renderMoves()
   renderTrades()
   renderDraft()
+  renderQuiz()
   renderTeam()
 }
 
@@ -794,7 +937,47 @@ document.addEventListener('click', (e) => {
   } else if (d.cell) {
     V.pickedCell = V.pickedCell === Number(d.cell) ? null : Number(d.cell)
     renderDraft()
+  } else if (d.action === 'roll') {
+    runRoll()
+    renderTable()
+  } else if (d.unslide) {
+    for (const k of Object.keys(V.sliders)) if (k.startsWith(`${d.unslide}-`)) delete V.sliders[k]
+    renderWeek()
+  } else if (d.banter) {
+    const [a, b] = V.witSides[d.banter] || []
+    if (a) {
+      const lines = banterLines(V.week, a, b).filter((l) => l !== V.banter[d.banter])
+      V.banter[d.banter] = pick(lines)
+      renderWeek()
+    }
+  } else if (d.copy) {
+    const el = document.getElementById(d.copy)
+    navigator.clipboard?.writeText(el.textContent).then(() => { b.textContent = 'Copied' }).catch(() => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      getSelection().removeAllRanges()
+      getSelection().addRange(range)
+    })
+  } else if (d.guess) {
+    const answer = Number(d.guess)
+    const right = draftRows().find((x) => x.no === V.quiz.no).rid === answer
+    V.quiz.answer = answer
+    V.quizScore = { right: V.quizScore.right + (right ? 1 : 0), total: V.quizScore.total + 1, streak: right ? V.quizScore.streak + 1 : 0 }
+    if (V.quizScore.streak > (Number(store.get(QUIZ_KEY)) || 0)) store.set(QUIZ_KEY, V.quizScore.streak)
+    renderQuiz()
+  } else if (d.action === 'next-question') {
+    newQuestion()
+    renderQuiz()
   }
+})
+
+document.addEventListener('input', (e) => {
+  const el = e.target
+  if (!el.dataset.slide) return
+  V.sliders[el.dataset.slide] = Number(el.value)
+  $(`#sv-${CSS.escape(el.dataset.slide)}`).textContent = f1(Number(el.value))
+  const [a, b] = V.witSides[el.dataset.mid] || []
+  if (a) $(`#witl-${CSS.escape(el.dataset.mid)}`).innerHTML = witLine(el.dataset.mid, a, b)
 })
 
 document.addEventListener('change', async (e) => {

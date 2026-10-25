@@ -106,53 +106,63 @@ export function strengths(rosterAvg, scoresByRid, slots) {
 const randn = (rand) => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand())
 
 /**
- * Plays out the rest of the regular season n times. `played` holds finished
- * weeks' records, `live` the week being played (its points so far), `schedule`
- * the weeks still to come as [ridA, ridB] pairs, `forced` week-index winners.
- * Top `playoffTeams` make it, the top two with byes, then a 6-team bracket.
+ * Plays out the rest of the regular season once. `table` holds finished weeks'
+ * records, `live` the week being played (its expected totals), `schedule` the
+ * weeks still to come as [ridA, ridB] pairs, `forced` week-index winners. The
+ * top `playoffTeams` make it, the top two with byes, then a 6-team bracket.
  */
-export function simulate({ rids, strength, table, live = [], schedule = [], forced = {}, playoffTeams = 6, n = 4000, rand = Math.random, doubt = STRENGTH_SD }) {
-  const tally = Object.fromEntries(rids.map((r) => [r, { po: 0, bye: 0, final: 0, title: 0, wins: 0 }]))
+function playSeason({ rids, strength, table, live = [], schedule = [], forced = {}, playoffTeams = 6, rand = Math.random, doubt = STRENGTH_SD }) {
   const base = Object.fromEntries(table.map((row) => [row.rid, row]))
+  const real = Object.fromEntries(rids.map((r) => [r, strength[r] + doubt * randn(rand)]))
+  const score = (r) => real[r] + WEEK_SD * randn(rand)
+  const wins = Object.fromEntries(rids.map((r) => [r, base[r]?.w ?? 0]))
+  const losses = Object.fromEntries(rids.map((r) => [r, base[r]?.l ?? 0]))
+  const pf = Object.fromEntries(rids.map((r) => [r, base[r]?.pf ?? 0]))
+  const result = (a, b, sa, sb, pick) => {
+    const w = pick ?? (sa > sb ? a : b)
+    wins[w]++
+    losses[w === a ? b : a]++
+    pf[a] += sa
+    pf[b] += sb
+  }
+  for (const [a, b] of live) {
+    result(a.roster_id, b.roster_id, a.points + LIVE_SD * randn(rand) / Math.SQRT2, b.points + LIVE_SD * randn(rand) / Math.SQRT2)
+  }
+  schedule.forEach((week, wi) => week.forEach(([a, b], gi) => result(a, b, score(a), score(b), forced[`${wi}:${gi}`])))
+  const seeds = [...rids].sort((a, b) => wins[b] - wins[a] || pf[b] - pf[a])
+  const field = seeds.slice(0, playoffTeams)
+  let bracket = null
+  if (field.length >= 6) {
+    const game = (a, b) => ({ a, b, w: score(a) > score(b) ? a : b })
+    const round1 = [game(field[2], field[5]), game(field[3], field[4])]
+    const [low, high] = seeds.indexOf(round1[0].w) > seeds.indexOf(round1[1].w) ? [round1[0].w, round1[1].w] : [round1[1].w, round1[0].w]
+    const semis = [game(field[0], low), game(field[1], high)]
+    const final = game(semis[0].w, semis[1].w)
+    bracket = { round1, semis, final, champ: final.w }
+  }
+  return { wins, losses, pf, seeds, field, bracket }
+}
+
+/** Plays out the rest of the season n times: each team's share of playoff spots, byes, finals and titles, and its average wins. */
+export function simulate({ n = 4000, ...opts }) {
+  const tally = Object.fromEntries(opts.rids.map((r) => [r, { po: 0, bye: 0, final: 0, title: 0, wins: 0 }]))
   for (let s = 0; s < n; s++) {
-    const real = Object.fromEntries(rids.map((r) => [r, strength[r] + doubt * randn(rand)]))
-    const score = (r) => real[r] + WEEK_SD * randn(rand)
-    const wins = Object.fromEntries(rids.map((r) => [r, base[r]?.w ?? 0]))
-    const pf = Object.fromEntries(rids.map((r) => [r, base[r]?.pf ?? 0]))
-    for (const [a, b] of live) {
-      const sa = a.points + LIVE_SD * randn(rand) / Math.SQRT2
-      const sb = b.points + LIVE_SD * randn(rand) / Math.SQRT2
-      wins[sa > sb ? a.roster_id : b.roster_id]++
-      pf[a.roster_id] += sa
-      pf[b.roster_id] += sb
+    const season = playSeason(opts)
+    season.field.forEach((r) => tally[r].po++)
+    season.field.slice(0, 2).forEach((r) => tally[r].bye++)
+    if (season.bracket) {
+      tally[season.bracket.final.a].final++
+      tally[season.bracket.final.b].final++
+      tally[season.bracket.champ].title++
     }
-    schedule.forEach((week, wi) => week.forEach(([a, b], gi) => {
-      const sa = score(a)
-      const sb = score(b)
-      wins[forced[`${wi}:${gi}`] ?? (sa > sb ? a : b)]++
-      pf[a] += sa
-      pf[b] += sb
-    }))
-    const seeds = [...rids].sort((a, b) => wins[b] - wins[a] || pf[b] - pf[a])
-    const field = seeds.slice(0, playoffTeams)
-    field.forEach((r) => tally[r].po++)
-    field.slice(0, 2).forEach((r) => tally[r].bye++)
-    const game = (a, b) => (score(a) > score(b) ? a : b)
-    if (field.length >= 6) {
-      const r1 = game(field[2], field[5])
-      const r2 = game(field[3], field[4])
-      const [low, high] = seeds.indexOf(r1) > seeds.indexOf(r2) ? [r1, r2] : [r2, r1]
-      const f1 = game(field[0], low)
-      const f2 = game(field[1], high)
-      tally[f1].final++
-      tally[f2].final++
-      tally[game(f1, f2)].title++
-    }
-    rids.forEach((r) => { tally[r].wins += wins[r] })
+    opts.rids.forEach((r) => { tally[r].wins += season.wins[r] })
   }
   for (const t of Object.values(tally)) for (const k of Object.keys(t)) t[k] /= n
   return tally
 }
+
+/** One possible way the rest of the season goes: final records, seeds and the bracket. */
+export const rollSeason = (opts) => playSeason(opts)
 
 /** Chance a beats b in one week. */
 export function winChance(sa, sb, doubt = STRENGTH_SD) {

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, starterCount, liveWinChance, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
+import { fantasyPoints, pairs, allPlay, standings, strengths, simulate, winChance, playerAverage, strengthSd, starterCount, liveWinChance, rollSeason, PRIOR_WEEKS, LOCK_UPLIFT, LAST_SEASON_GAMES, ROOKIE_AVG, STRENGTH_SD } from '../logic.js'
 
 const side = (roster_id, matchup_id, points) => ({ roster_id, matchup_id, points })
 
@@ -109,4 +109,20 @@ test('live win odds land within a point of the app (56%, 61%, 47%, 60% on Oct 25
   near(liveWinChance(259.55, 262.38, [27.54, 31.13, 21.77, 23.48]), 47)
   near(liveWinChance(245.44, 232.75, [22.5, 21.7, 20.73, 25.03, 20.27, 23.96]), 60)
   assert.equal(liveWinChance(250, 240, []), 1)
+})
+
+test('one rolled season gives every team a record, six seeds in the bracket and a champion among them', () => {
+  const rids = [1, 2, 3, 4, 5, 6, 7, 8]
+  const strength = Object.fromEntries(rids.map((r) => [r, 240 + r]))
+  const table = rids.map((rid) => ({ rid, w: 1, l: 0, pf: 250 }))
+  const week = [[1, 2], [3, 4], [5, 6], [7, 8]]
+  let seed = 11
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const s = rollSeason({ rids, strength, table, schedule: Array.from({ length: 20 }, () => week), rand })
+  assert.equal(rids.reduce((n, r) => n + s.wins[r] + s.losses[r], 0), 8 * 21)
+  assert.equal(s.field.length, 6)
+  assert.deepEqual([...s.seeds].sort(), rids)
+  assert.ok(s.field.includes(s.bracket.champ))
+  assert.ok([s.bracket.final.a, s.bracket.final.b].includes(s.bracket.champ))
+  assert.ok(s.bracket.semis.some((g) => g.a === s.field[0]) && s.bracket.semis.some((g) => g.a === s.field[1]))
 })
